@@ -1,6 +1,6 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client";
-import { authenticate } from "../middleware/authmiddleware.js"; // ✅ ensure correct file name + casing
+import { authenticate } from "../middleware/authmiddleware.js"; // ✅ correct file name + casing
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -16,7 +16,7 @@ router.post("/", authenticate, async (req, res) => {
         location,
         size,
         rentAmount,
-        ownerId: req.user.id, // ✅ correct field name per Prisma schema
+        ownerId: req.user.id, // ✅ link to the logged-in user
       },
     });
 
