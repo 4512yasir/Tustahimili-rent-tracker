@@ -1,0 +1,58 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Plot {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  name       String
+  location   String
+  size       String?     
+  rentAmount Float
+  ownerId    String
+  owner      User     @relation(fields: [ownerId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+
+model Rent {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenant    String
+  amount    Float
+  dueDate   DateTime
+  paid      Boolean  @default(false)
+  plotId    String
+  createdAt DateTime @default(now())
+}
+
+model Repair {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  plotId      String
+  description String
+  cost        Float
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+}
+
+model Expense {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  plotId      String
+  description String
+  amount      Float
+  date        DateTime @default(now())
+}
