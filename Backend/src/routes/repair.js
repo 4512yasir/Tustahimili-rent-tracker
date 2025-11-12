@@ -1,58 +1,34 @@
-import express from "express";
-import { PrismaClient } from "@prisma/client";
-import { authenticate } from "../middleware/authmiddleware.js";
-
+// routes/repairs.js
+const express = require("express");
+const Repair = require("../models/repair");
+const auth = require("../middleware/auth");
+const { isAgent } = require("../middleware/role");
 const router = express.Router();
-const prisma = new PrismaClient();
 
-// ✅ Request Repair
-router.post("/", authenticate, async (req, res) => {
+// GET all repairs
+router.get("/", auth, async (req, res) => {
   try {
-    const { plotId, description, imageUrl } = req.body;
-
-    const repair = await prisma.repair.create({
-      data: {
-        description,
-        imageUrl,
-        agentId: req.user.id,
-        plotId,
-        status: "pending",
-      },
-    });
-
-    res.status(201).json(repair);
-  } catch (err) {
-    console.error("Create repair error:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ✅ Get Repairs for Current User
-router.get("/", authenticate, async (req, res) => {
-  try {
-    const repairs = await prisma.repair.findMany({
-      where: { agentId: req.user.id },
-      include: { plot: true },
-    });
+    let repairs;
+    if (req.user.role === "agent") {
+      repairs = await Repair.find({ createdBy: req.user._id }).populate("plot createdBy", "name email");
+    } else {
+      repairs = await Repair.find().populate("plot createdBy", "name email");
+    }
     res.json(repairs);
   } catch (err) {
-    console.error("Fetch repairs error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ Update Repair Status
-router.put("/:id", authenticate, async (req, res) => {
+// POST log repair (agent only)
+router.post("/", auth, isAgent, async (req, res) => {
   try {
-    const repair = await prisma.repair.update({
-      where: { id: req.params.id },
-      data: { status: req.body.status || "completed" },
-    });
-    res.json(repair);
+    const repair = new Repair({ ...req.body, createdBy: req.user._id });
+    await repair.save();
+    res.status(201).json(repair);
   } catch (err) {
-    console.error("Update repair error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-export default router;
+module.exports = router;

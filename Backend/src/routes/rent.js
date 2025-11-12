@@ -1,257 +1,108 @@
-import express from "express";
-import { PrismaClient } from "@prisma/client";
-import { authenticate } from "../middleware/authmiddleware.js";
+const express = require("express");
+const RentPayment = require("../models/rent");
+const Plot = require("../models/plot");
+const auth = require("../middleware/auth");
+const { isAgent } = require("../middleware/role");
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
-/**
- * ✅ Create Rent Record
- * Authenticated user (agent/landlord) records rent for a plot
- */
-router.post("/", authenticate, async (req, res) => {
+// GET all rents (committee sees all, agent sees own)
+router.get("/", auth, async (req, res) => {
   try {
-    const { tenant, plotId, amount, dueDate, paid } = req.body;
+    let rents;
+    if (req.user.role === "agent") {
+      rents = await RentPayment.find({ user: req.user._id }).populate("plot user", "name email");
+    } else {
+      rents = await RentPayment.find().populate("plot user", "name email");
+    }
+    res.json(rents);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
-    if (!tenant || !plotId || !amount || !dueDate) {
-      return res.status(400).json({ message: "All fields are required" });
+// POST add rent (agent only)
+router.post("/", auth, isAgent, async (req, res) => {
+  try {
+    const { plot, amount, tenantName } = req.body;
+
+    const plotData = await Plot.findById(plot);
+    if (!plotData) return res.status(404).json({ message: "Plot not found" });
+    if (!plotData.assignedAgent || plotData.assignedAgent.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Not assigned to this plot" });
     }
 
-    const rent = await prisma.rent.create({
-      data: {
-        tenant,
-        amount: parseFloat(amount),
-        dueDate: new Date(dueDate),
-        paid: paid || false,
-        agentId: req.user.id,
-        plotId,
-      },
-      include: {
-        plot: true,
-      },
+    const rent = new RentPayment({
+      plot,
+      user: req.user._id,
+      amount,
+      tenantName,
+      status: "unpaid",
     });
 
-    res.status(201).json({
-      message: "Rent record created successfully",
-      rent,
-    });
+    await rent.save();
+    res.status(201).json(rent);
   } catch (err) {
-    console.error("Create rent error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-/**
- * ✅ Get All Rents (for authenticated agent)
- */
-router.get("/", authenticate, async (req, res) => {
+// PATCH mark rent as paid
+router.patch("/:id/mark-paid", auth, async (req, res) => {
   try {
-    const rents = await prisma.rent.findMany({
-      where: { agentId: req.user.id },
-      include: {
-        plot: {
-          select: {
-            name: true,
-            location: true,
-            rentAmount: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const rent = await RentPayment.findById(req.params.id);
+    if (!rent) return res.status(404).json({ message: "Rent not found" });
 
-    res.status(200).json(rents);
-  } catch (err) {
-    console.error("Fetch rents error:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
+    // Only committee or rent owner can mark as paid
+    if (req.user.role !== "committee" && rent.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
 
-/**
- * ✅ Get Single Rent Record
- */
-router.get("/:id", authenticate, async (req, res) => {
-  try {
-    const rent = await prisma.rent.findUnique({
-      where: { id: req.params.id },
-      include: { plot: true },
-    });
-
-    if (!rent) return res.status(404).json({ message: "Rent record not found" });
-    if (rent.agentId !== req.user.id)
-      return res.status(403).json({ message: "Access denied" });
-
+    rent.status = "paid";
+    await rent.save();
     res.json(rent);
   } catch (err) {
-    console.error("Get rent error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-/**
- * ✅ Update Rent (mark as paid or update fields)
- */
-router.put("/:id", authenticate, async (req, res) => {
+// PUT edit rent (committee can edit all, agent can edit own)
+router.put("/:id", auth, async (req, res) => {
   try {
-    const { paid } = req.body;
-
-    const rent = await prisma.rent.findUnique({
-      where: { id: req.params.id },
-    });
-
-    if (!rent) return res.status(404).json({ message: "Rent record not found" });
-    if (rent.agentId !== req.user.id)
-      return res.status(403).json({ message: "Access denied" });
-
-    const updatedRent = await prisma.rent.update({
-      where: { id: req.params.id },
-      data: {
-        paid: paid === true,
-        paidAt: paid ? new Date() : null,
-      },
-      include: { plot: true },
-    });
-
-    res.json({
-      message: "Rent record updated successfully",
-      rent: updatedRent,
-    });
-  } catch (err) {
-    console.error("Update rent error:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-/**
- * ✅ Delete Rent Record
- */
-router.delete("/:id", authenticate, async (req, res) => {
-  try {
-    const rent = await prisma.rent.findUnique({
-      where: { id: req.params.id },
-    });
-
+    const rent = await RentPayment.findById(req.params.id);
     if (!rent) return res.status(404).json({ message: "Rent not found" });
-    if (rent.agentId !== req.user.id)
-      return res.status(403).json({ message: "Access denied" });
 
-    await prisma.rent.delete({
-      where: { id: req.params.id },
-    });
-
-    res.json({ message: "Rent deleted successfully" });
-  } catch (err) {
-    console.error("Delete rent error:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-/**
- * ✅ Summary: Rents grouped by Plot (for dashboard charts)
- */
-router.get("/summary/by-plot", authenticate, async (req, res) => {
-  try {
-    const { month, year } = req.query;
-
-    let dateFilter = {};
-    if (month && year) {
-      const start = new Date(year, month - 1, 1);
-      const end = new Date(year, month, 0);
-      dateFilter = {
-        createdAt: {
-          gte: start,
-          lte: end,
-        },
-      };
+    if (req.user.role !== "committee" && rent.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Not allowed" });
     }
 
-    const plots = await prisma.plot.findMany({
-      where: { ownerId: req.user.id },
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        rentAmount: true,
-        rents: {
-          where: dateFilter,
-          select: {
-            amount: true,
-            paid: true,
-          },
-        },
-      },
-    });
+    const { tenantName, amount, status } = req.body;
+    if (tenantName) rent.tenantName = tenantName;
+    if (amount) rent.amount = amount;
+    if (status && req.user.role === "committee") rent.status = status; // only committee can set status manually
 
-    const summary = plots.map((plot) => {
-      const totalRents = plot.rents.length;
-      const totalCollected = plot.rents
-        .filter((r) => r.paid)
-        .reduce((sum, r) => sum + r.amount, 0);
-      const totalPending = plot.rents
-        .filter((r) => !r.paid)
-        .reduce((sum, r) => sum + r.amount, 0);
-
-      return {
-        plotId: plot.id,
-        name: plot.name,
-        location: plot.location,
-        rentAmount: plot.rentAmount,
-        totalRents,
-        totalCollected,
-        totalPending,
-      };
-    });
-
-    res.json({
-      message: "✅ Rent summary by plot retrieved successfully",
-      summary,
-    });
+    await rent.save();
+    res.json(rent);
   } catch (err) {
-    console.error("Summary by plot error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-/**
- * ✅ Dashboard Overview
- * Provides quick KPI metrics for dashboard cards
- */
-router.get("/summary/overview", authenticate, async (req, res) => {
+// DELETE rent (committee can delete all, agent can delete own)
+router.delete("/:id", auth, async (req, res) => {
   try {
-    // All rents by agent
-    const rents = await prisma.rent.findMany({
-      where: { agentId: req.user.id },
-    });
+    const rent = await RentPayment.findById(req.params.id);
+    if (!rent) return res.status(404).json({ message: "Rent not found" });
 
-    const plotsCount = await prisma.plot.count({
-      where: { ownerId: req.user.id },
-    });
+    if (req.user.role !== "committee" && rent.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
 
-    const tenants = [
-      ...new Set(rents.map((r) => r.tenant?.trim().toLowerCase())),
-    ].filter(Boolean);
-
-    const totalCollected = rents
-      .filter((r) => r.paid)
-      .reduce((sum, r) => sum + r.amount, 0);
-
-    const totalPending = rents
-      .filter((r) => !r.paid)
-      .reduce((sum, r) => sum + r.amount, 0);
-
-    res.json({
-      message: "✅ Dashboard overview generated successfully",
-      data: {
-        totalCollected,
-        totalPending,
-        totalPlots: plotsCount,
-        totalTenants: tenants.length,
-      },
-    });
+    await RentPayment.findByIdAndDelete(req.params.id);
+    res.json({ message: "Rent deleted successfully" });
   } catch (err) {
-    console.error("Overview summary error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-export default router;
+module.exports = router;

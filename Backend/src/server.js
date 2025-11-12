@@ -1,35 +1,24 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import { PrismaClient } from "@prisma/client";
+const express = require("express");
+const cors = require("cors");
+const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/users");
+const plotRoutes = require("./routes/plots");
+const rentRoutes = require("./routes/rents");
+const repairRoutes = require("./routes/repairs");
+const expenseRoutes = require("./routes/expenses");
 
-import plotRoutes from "./routes/plots.js";
-import authRoutes from "./routes/auth.js";
-import rentRoutes from "./routes/rent.js";
-import repairRoutes from "./routes/repair.js";
-import expenseRoutes from "./routes/expenses.js";
-
-dotenv.config();
 const app = express();
-const prisma = new PrismaClient();
 
 app.use(cors());
 app.use(express.json());
 
-app.use("/api/plots", plotRoutes);
+// Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/plots", plotRoutes);
 app.use("/api/rents", rentRoutes);
 app.use("/api/repairs", repairRoutes);
 app.use("/api/expenses", expenseRoutes);
 
-const PORT = process.env.PORT || 4000;
-
-app.listen(PORT, async () => {
-  try {
-    await prisma.$connect();
-    console.log("✅ Connected to MongoDB");
-    console.log(`🚀 Server running on port ${PORT}`);
-  } catch (err) {
-    console.error("❌ Database connection failed:", err.message);
-  }
-});
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));

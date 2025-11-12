@@ -1,44 +1,34 @@
-import express from "express";
-import { PrismaClient } from "@prisma/client";
-import { authenticate } from "../middleware/authmiddleware.js";
-
+// routes/expenses.js
+const express = require("express");
+const Expense = require("../models/expense");
+const auth = require("../middleware/auth");
+const { isAgent } = require("../middleware/role");
 const router = express.Router();
-const prisma = new PrismaClient();
 
-// ✅ Create Expense
-router.post("/", authenticate, async (req, res) => {
+// GET all expenses
+router.get("/", auth, async (req, res) => {
   try {
-    const { plotId, description, amount, category } = req.body;
-
-    const expense = await prisma.expense.create({
-      data: {
-        description,
-        amount,
-        category,
-        plotId,
-        userId: req.user.id,
-      },
-    });
-
-    res.status(201).json(expense);
-  } catch (err) {
-    console.error("Create expense error:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ✅ Get Expenses (for user)
-router.get("/", authenticate, async (req, res) => {
-  try {
-    const expenses = await prisma.expense.findMany({
-      where: { userId: req.user.id },
-      include: { plot: true },
-    });
+    let expenses;
+    if (req.user.role === "agent") {
+      expenses = await Expense.find({ createdBy: req.user._id }).populate("plot createdBy", "name email");
+    } else {
+      expenses = await Expense.find().populate("plot createdBy", "name email");
+    }
     res.json(expenses);
   } catch (err) {
-    console.error("Fetch expenses error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-export default router;
+// POST add expense (agent only)
+router.post("/", auth, isAgent, async (req, res) => {
+  try {
+    const expense = new Expense({ ...req.body, createdBy: req.user._id });
+    await expense.save();
+    res.status(201).json(expense);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+module.exports = router;

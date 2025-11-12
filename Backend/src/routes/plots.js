@@ -1,61 +1,57 @@
-import express from "express";
-import { PrismaClient } from "@prisma/client";
-import { authenticate } from "../middleware/authmiddleware.js"; // ✅ correct file name + casing
-
+// routes/plots.js
+const express = require("express");
+const Plot = require("../models/plot");
+const auth = require("../middleware/auth");
+const { isCommittee } = require("../middleware/role");
 const router = express.Router();
-const prisma = new PrismaClient();
 
-// ✅ Create a plot (protected)
-router.post("/", authenticate, async (req, res) => {
+// GET all plots
+router.get("/", auth, async (req, res) => {
   try {
-    const { name, location, size, rentAmount } = req.body;
-
-    const plot = await prisma.plot.create({
-      data: {
-        name,
-        location,
-        size,
-        rentAmount,
-        ownerId: req.user.id, // ✅ link to the logged-in user
-      },
-    });
-
-    res.status(201).json(plot);
-  } catch (err) {
-    console.error("Create plot error:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ✅ Get all plots (protected)
-router.get("/", authenticate, async (req, res) => {
-  try {
-    const plots = await prisma.plot.findMany({
-      where: { ownerId: req.user.id }, // ✅ correct field name
-    });
+    const plots = await Plot.find().populate("assignedAgent", "name email");
     res.json(plots);
   } catch (err) {
-    console.error("Get plots error:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Error fetching plots", error: err.message });
   }
 });
 
-// ✅ Get one plot (protected)
-router.get("/:id", authenticate, async (req, res) => {
+// POST create plot (committee only)
+router.post("/", auth, isCommittee, async (req, res) => {
   try {
-    const plot = await prisma.plot.findUnique({
-      where: { id: req.params.id },
-    });
+    const plot = new Plot(req.body);
+    await plot.save();
+    res.status(201).json(plot);
+  } catch (err) {
+    res.status(500).json({ message: "Error creating plot", error: err.message });
+  }
+});
+
+// PATCH assign plot to agent (committee only)
+router.patch("/:id/assign", auth, isCommittee, async (req, res) => {
+  const { agentId } = req.body;
+  try {
+    const plot = await Plot.findByIdAndUpdate(
+      req.params.id,
+      { assignedAgent: agentId },
+      { new: true }
+    ).populate("assignedAgent", "name email");
 
     if (!plot) return res.status(404).json({ message: "Plot not found" });
-    if (plot.ownerId !== req.user.id)
-      return res.status(403).json({ message: "Access denied" });
-
     res.json(plot);
   } catch (err) {
-    console.error("Get single plot error:", err);
+    res.status(500).json({ message: "Error assigning plot", error: err.message });
+  }
+});
+// DELETE plot
+router.delete("/:id", auth, isCommittee, async (req, res) => {
+  try {
+    const plot = await Plot.findByIdAndDelete(req.params.id);
+    if (!plot) return res.status(404).json({ message: "Plot not found" });
+    res.json({ message: "Plot deleted successfully" });
+  } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-export default router;
+
+module.exports = router;

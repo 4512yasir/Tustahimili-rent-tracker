@@ -1,10 +1,11 @@
-const jwt = require('jsonwebtoken');
-const SECRET = process.env.JWT_SECRET || 'change-me';
+const jwt = require("jsonwebtoken");
 
-function sign(payload, expiresIn = '7d') {
-  return jwt.sign(payload, SECRET, { expiresIn });
-}
-function verify(token) {
-  return jwt.verify(token, SECRET);
-}
-module.exports = { sign, verify };
+const generateToken = (user) => {
+  return jwt.sign(
+    { id: user.id, name: user.name, email: user.email, role: user.role },
+    process.env.JWT_SECRET || "secret123",
+    { expiresIn: "7d" }
+  );
+};
+
+module.exports = { generateToken };
